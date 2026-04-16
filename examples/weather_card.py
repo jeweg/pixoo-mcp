@@ -38,7 +38,7 @@ def weather_card(p: Pixoo):
         return
 
     s = p.size
-    p.clear(10, 10, 30)
+    p.draw_gradient(0, 0, s, s, 15, 15, 50, 5, 5, 15)
 
     # --- header ---
     p.draw_rect(0, 0, s, 9, 20, 15, 50, filled=True)

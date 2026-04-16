@@ -60,15 +60,15 @@ Pixoo(ip, port=80, *, size=64, refresh_connection=True, debug=False)
 
 | Method | Description |
 |--------|-------------|
-| `clear(r, g, b)` | Fill buffer with a solid color |
+| `clear(r, g, b)` | Fill buffer with a solid colour |
 | `set_pixel(x, y, r, g, b)` | Set a single pixel |
-| `draw_line(x0, y0, x1, y1, r, g, b)` | Bresenham line |
-| `draw_rect(x, y, w, h, r, g, b, filled=False)` | Rectangle |
-| `draw_circle(cx, cy, radius, r, g, b, filled=False)` | Circle |
-| `draw_bar(x, y, w, h, value, r, g, b, ...)` | Progress bar (0.0-1.0) |
-| `draw_gradient(x, y, w, h, r0, g0, b0, r1, g1, b1, direction=)` | Linear gradient fill |
-| `draw_text(text, x, y, r, g, b, align=, max_width=)` | Bitmap text (PICO-8 font) |
-| `draw_image(source, xy=(0,0))` | Load image (path, file, or PIL Image) |
+| `draw_line(x0, y0, x1, y1, r, g, b)` | Line between two points |
+| `draw_rect(x, y, w, h, r, g, b, filled=False)` | Rectangle (outline or filled) |
+| `draw_circle(cx, cy, radius, r, g, b, filled=False)` | Circle (outline or filled) |
+| `draw_gradient(x, y, w, h, r0, g0, b0, r1, g1, b1, direction=)` | Linear gradient fill. Blends from (r0,g0,b0) to (r1,g1,b1). `direction`: `"vertical"` (top→bottom, default) or `"horizontal"` (left→right) |
+| `draw_bar(x, y, w, h, value, r, g, b, ...)` | Progress bar. `value` 0.0–1.0, unfilled portion uses `bg_r/bg_g/bg_b` (default 40) |
+| `draw_text(text, x, y, r, g, b, align=, max_width=)` | Bitmap text (PICO-8 font, see below) |
+| `draw_image(source, xy=(0,0))` | Load image (path, file, or PIL Image); auto-resizes to fit |
 | `push()` | Send buffer to the display |
 
 ### Text features
