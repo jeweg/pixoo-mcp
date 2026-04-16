@@ -1,4 +1,4 @@
-# pixoo
+# pixoo-mcp
 
 Python library and MCP server for [Divoom Pixoo](https://divoom.com/products/pixoo-64) LED displays (16x16, 32x32, 64x64).
 
