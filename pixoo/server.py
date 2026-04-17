@@ -69,11 +69,44 @@ def _ensure_screen_on_sync(p: Pixoo):
         pass
 
 
+_REQUIRED_DRAW_FIELDS: dict[str, tuple[str, ...]] = {
+    "pixel": ("x", "y", "r", "g", "b"),
+    "line": ("x0", "y0", "x1", "y1", "r", "g", "b"),
+    "rect": ("x", "y", "w", "h", "r", "g", "b"),
+    "circle": ("cx", "cy", "radius", "r", "g", "b"),
+    "text": ("text",),
+    "bar": ("x", "y", "w", "h", "value"),
+    "gradient": ("x", "y", "w", "h", "r0", "g0", "b0", "r1", "g1", "b1"),
+}
+
+
+def _validate_draw_command(cmd: dict, index: int) -> str:
+    """Validate a draw command and return normalized op."""
+    op = str(cmd.get("op") or cmd.get("type") or "").lower().strip()
+    if not op:
+        raise ValueError(f"commands[{index}] is missing 'op'")
+
+    if op in ("clear", "fill"):
+        return op
+
+    if op not in _REQUIRED_DRAW_FIELDS:
+        supported = ", ".join(sorted(["clear", "fill", *_REQUIRED_DRAW_FIELDS.keys()]))
+        raise ValueError(
+            f"commands[{index}] has unsupported op '{op}'. Supported ops: {supported}"
+        )
+
+    missing = [field for field in _REQUIRED_DRAW_FIELDS[op] if field not in cmd]
+    if missing:
+        raise ValueError(
+            f"commands[{index}] op '{op}' missing required fields: {', '.join(missing)}"
+        )
+    return op
+
+
 def _exec_draw_commands(p: Pixoo, commands: list[dict]):
     """Execute a batch of draw commands on a Pixoo instance (synchronous)."""
-    for cmd in commands:
-        op = cmd.get("op") or cmd.get("type") or ""
-        op = op.lower()
+    for i, cmd in enumerate(commands):
+        op = _validate_draw_command(cmd, i)
         if op == "clear" or op == "fill":
             p.clear(cmd.get("r", 0), cmd.get("g", 0), cmd.get("b", 0))
         elif op == "pixel":
@@ -206,15 +239,18 @@ async def draw(commands: list[dict[str, Any]]) -> str:
     """
     p = _get_pixoo()
 
-    async with _lock:
-        loop = asyncio.get_event_loop()
+    try:
+        async with _lock:
+            loop = asyncio.get_event_loop()
 
-        def do():
-            _ensure_screen_on_sync(p)
-            _exec_draw_commands(p, commands)
-            return p.push()
+            def do():
+                _ensure_screen_on_sync(p)
+                _exec_draw_commands(p, commands)
+                return p.push()
 
-        result = await loop.run_in_executor(None, do)
+            result = await loop.run_in_executor(None, do)
+    except (KeyError, TypeError, ValueError) as exc:
+        return f"Draw failed: {exc}"
 
     ok = result.get("error_code", -1) == 0
     return f"Drew {len(commands)} commands and pushed: {'ok' if ok else result}"
@@ -344,15 +380,18 @@ async def http_draw(request: Request):
     body = await request.json()
     commands = body.get("commands", [])
     p = _get_pixoo()
-    async with _lock:
-        loop = asyncio.get_event_loop()
+    try:
+        async with _lock:
+            loop = asyncio.get_event_loop()
 
-        def do():
-            _ensure_screen_on_sync(p)
-            _exec_draw_commands(p, commands)
-            return p.push()
+            def do():
+                _ensure_screen_on_sync(p)
+                _exec_draw_commands(p, commands)
+                return p.push()
 
-        result = await loop.run_in_executor(None, do)
+            result = await loop.run_in_executor(None, do)
+    except (KeyError, TypeError, ValueError) as exc:
+        return _json_err(f"draw validation error: {exc}", status=400)
     return _json_ok({"device": result, "commands": len(commands)})
 
 
