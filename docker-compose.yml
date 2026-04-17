@@ -1,0 +1,8 @@
+services:
+  pixoo-mcp:
+    build: .
+    container_name: pixoo-mcp
+    network_mode: host
+    restart: unless-stopped
+    environment:
+      - PIXOO_IP=${PIXOO_IP}

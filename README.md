@@ -117,8 +117,16 @@ PIXOO_IP=10.0.0.42 python -m pixoo.server --http
 ### Docker
 
 ```bash
+# from the repo root; uses PIXOO_IP from your shell/.env
+docker compose up -d --build
+```
+
+Manual equivalent:
+
+```bash
 docker build -t pixoo-mcp .
-docker run -d --network host -e PIXOO_IP=10.0.0.42 pixoo-mcp
+docker rm -f pixoo-mcp 2>/dev/null || true
+docker run -d --name pixoo-mcp --network host -e PIXOO_IP pixoo-mcp
 ```
 
 ### Cursor IDE

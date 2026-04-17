@@ -58,6 +58,17 @@ async def _run_locked(fn, *args, **kwargs):
         return await loop.run_in_executor(None, lambda: fn(*args, **kwargs))
 
 
+def _ensure_screen_on_sync(p: Pixoo):
+    """Best-effort wake before visual updates."""
+    try:
+        # Some firmware/models report LightSwitch unreliably, so do an
+        # idempotent wake call directly instead of branching on config.
+        p.screen_on()
+    except Exception:
+        # Avoid blocking draw/text/image operations if wake fails.
+        pass
+
+
 def _exec_draw_commands(p: Pixoo, commands: list[dict]):
     """Execute a batch of draw commands on a Pixoo instance (synchronous)."""
     for cmd in commands:
@@ -199,6 +210,7 @@ async def draw(commands: list[dict[str, Any]]) -> str:
         loop = asyncio.get_event_loop()
 
         def do():
+            _ensure_screen_on_sync(p)
             _exec_draw_commands(p, commands)
             return p.push()
 
@@ -221,7 +233,10 @@ async def show_image(url: str) -> str:
     p = _get_pixoo()
     async with _lock:
         loop = asyncio.get_event_loop()
-        await loop.run_in_executor(None, lambda: (p.draw_image(img), p.push()))
+        await loop.run_in_executor(
+            None,
+            lambda: (_ensure_screen_on_sync(p), p.draw_image(img), p.push()),
+        )
     return f"Image from {url} displayed"
 
 
@@ -247,10 +262,15 @@ async def show_text(
     font: 0–7 (device built-in fonts, not the PICO-8 bitmap font).
     color: hex string like "#FF0000".
     """
-    result = await _run_locked(
-        _get_pixoo().send_text, text,
-        x=x, y=y, color=color, font=font, speed=speed,
-    )
+    p = _get_pixoo()
+    async with _lock:
+        loop = asyncio.get_event_loop()
+
+        def do():
+            _ensure_screen_on_sync(p)
+            return p.send_text(text, x=x, y=y, color=color, font=font, speed=speed)
+
+        result = await loop.run_in_executor(None, do)
     ok = result.get("error_code", -1) == 0
     return f"Text '{text}' displayed: {'ok' if ok else result}"
 
@@ -328,6 +348,7 @@ async def http_draw(request: Request):
         loop = asyncio.get_event_loop()
 
         def do():
+            _ensure_screen_on_sync(p)
             _exec_draw_commands(p, commands)
             return p.push()
 
@@ -399,19 +420,32 @@ async def http_image(request: Request):
     p = _get_pixoo()
     async with _lock:
         loop = asyncio.get_event_loop()
-        await loop.run_in_executor(None, lambda: (p.draw_image(img), p.push()))
+        await loop.run_in_executor(
+            None,
+            lambda: (_ensure_screen_on_sync(p), p.draw_image(img), p.push()),
+        )
     return _json_ok()
 
 
 @mcp.custom_route("/api/text", methods=["POST"])
 async def http_text(request: Request):
     b = await request.json()
-    result = await _run_locked(
-        _get_pixoo().send_text, b["text"],
-        x=b.get("x", 0), y=b.get("y", 0),
-        color=b.get("color", "#FFFFFF"),
-        font=b.get("font", 2), speed=b.get("speed", 0),
-    )
+    p = _get_pixoo()
+    async with _lock:
+        loop = asyncio.get_event_loop()
+
+        def do():
+            _ensure_screen_on_sync(p)
+            return p.send_text(
+                b["text"],
+                x=b.get("x", 0),
+                y=b.get("y", 0),
+                color=b.get("color", "#FFFFFF"),
+                font=b.get("font", 2),
+                speed=b.get("speed", 0),
+            )
+
+        result = await loop.run_in_executor(None, do)
     return _json_ok({"device": result})
 
 
