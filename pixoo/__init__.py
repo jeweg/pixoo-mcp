@@ -36,11 +36,12 @@ To stay visible you can either:
 from __future__ import annotations
 
 import base64
+import io
 import time
 
 import requests
 
-__all__ = ["Pixoo", "discover", "hsv_to_rgb"]
+__all__ = ["Pixoo", "discover", "hsv_to_rgb", "parse_color"]
 
 # ---------------------------------------------------------------------------
 # Optional PIL support — gracefully degrade if not installed
@@ -349,6 +350,57 @@ class Pixoo:
                 y -= 1
             x += 1
 
+    # ------------------------------------------------------------------
+    # Inline bitmap (palette + char-grid sprite)
+    # ------------------------------------------------------------------
+
+    def draw_bitmap(
+        self,
+        x: int,
+        y: int,
+        palette: list,
+        data: list[str],
+        *,
+        scale: int = 1,
+    ):
+        """Draw a sprite from a palette and a character-grid.
+
+        *palette* is a list of colour entries; each entry is either a
+        ``(r, g, b)`` tuple or ``None`` (transparent — pixel is skipped).
+        *data* is a list of strings, one per row, where each character is a
+        base-36 palette index (``0``–``9``, then ``a``–``z`` for indices 10–35;
+        case-insensitive).
+
+        *scale* upsamples nearest-neighbour: each source pixel becomes a
+        ``scale × scale`` block in the destination.
+
+        Pixels with palette index out of range are silently treated as
+        transparent.  Pixels falling outside the display bounds are clipped.
+        """
+        if scale < 1:
+            scale = 1
+        n = len(palette)
+        for row_idx, row in enumerate(data):
+            for col_idx, ch in enumerate(row):
+                # Base-36 index (0-9, a-z).  int() raises on bad chars; treat as transparent.
+                try:
+                    idx = int(ch, 36)
+                except ValueError:
+                    continue
+                if idx >= n:
+                    continue
+                colour = palette[idx]
+                if colour is None:
+                    continue
+                r, g, b = colour
+                if scale == 1:
+                    self.set_pixel(x + col_idx, y + row_idx, r, g, b)
+                else:
+                    self.draw_rect(
+                        x + col_idx * scale, y + row_idx * scale,
+                        scale, scale, r, g, b, filled=True,
+                    )
+
     def _hline(self, x0: int, x1: int, y: int, r: int, g: int, b: int):
         if 0 <= y < self.size:
             x0 = max(0, x0)
@@ -463,6 +515,52 @@ class Pixoo:
     def snapshot(self) -> bytes:
         """Return a copy of the current buffer (useful for building animations)."""
         return bytes(self._buffer)
+
+    def to_png(self, scale: int = 4) -> bytes:
+        """Encode the current buffer as PNG bytes.
+
+        *scale* upsamples with nearest-neighbour so the pixel grid stays crisp
+        when the image is viewed at non-native size.  Requires Pillow.
+        """
+        if not _HAS_PIL:
+            raise ImportError("Pillow is required for to_png: pip install Pillow")
+        img = Image.frombytes("RGB", (self.size, self.size), bytes(self._buffer))
+        if scale and scale > 1:
+            img = img.resize(
+                (self.size * scale, self.size * scale),
+                Image.Resampling.NEAREST,
+            )
+        out = io.BytesIO()
+        img.save(out, format="PNG", optimize=True)
+        return out.getvalue()
+
+    def save_png(self, path: str, scale: int = 4):
+        """Write the current buffer to *path* as a PNG file."""
+        with open(path, "wb") as f:
+            f.write(self.to_png(scale=scale))
+
+    def to_ascii(self) -> str:
+        """Return a grayscale ASCII preview of the current buffer.
+
+        Uses a 10-level ramp (`" .:-=+*#%@"`) based on perceptual luminance.
+        One character per pixel, rows separated by newlines — suitable for
+        returning in an MCP tool response so an LLM can see the layout.
+        """
+        ramp = " .:-=+*#%@"
+        n = len(ramp) - 1
+        lines = []
+        for y in range(self.size):
+            row = []
+            for x in range(self.size):
+                off = (y * self.size + x) * 3
+                r = self._buffer[off]
+                g = self._buffer[off + 1]
+                b = self._buffer[off + 2]
+                # Rec. 709 luminance
+                lum = (0.2126 * r + 0.7152 * g + 0.0722 * b) / 255.0
+                row.append(ramp[min(n, int(lum * n + 0.5))])
+            lines.append("".join(row))
+        return "\n".join(lines)
 
     def hold(self, seconds: float = 60, interval: float = 10):
         """Re-push the current buffer periodically to prevent the phone app
@@ -782,6 +880,71 @@ _FONT_PICO8 = {
 
 def _clamp(v: int, lo: int, hi: int) -> int:
     return max(lo, min(hi, v))
+
+
+# Common CSS colour names — kept small and obvious on purpose.
+_NAMED_COLORS: dict[str, tuple[int, int, int]] = {
+    "black":     (0,   0,   0),
+    "white":     (255, 255, 255),
+    "red":       (255, 0,   0),
+    "green":     (0,   128, 0),
+    "lime":      (0,   255, 0),
+    "blue":      (0,   0,   255),
+    "yellow":    (255, 255, 0),
+    "cyan":      (0,   255, 255),
+    "magenta":   (255, 0,   255),
+    "orange":    (255, 165, 0),
+    "purple":    (128, 0,   128),
+    "pink":      (255, 105, 180),
+    "brown":     (139, 69,  19),
+    "gray":      (128, 128, 128),
+    "grey":      (128, 128, 128),
+    "lightgray": (192, 192, 192),
+    "lightgrey": (192, 192, 192),
+    "darkgray":  (64,  64,  64),
+    "darkgrey":  (64,  64,  64),
+    "darkred":   (139, 0,   0),
+    "darkgreen": (0,   100, 0),
+    "darkblue":  (0,   0,   139),
+}
+
+
+def parse_color(value) -> tuple[int, int, int]:
+    """Parse a colour spec into an ``(r, g, b)`` tuple of 0–255 ints.
+
+    Accepts:
+      * Hex strings: ``"#rgb"``, ``"#rrggbb"`` (``#`` optional)
+      * Named CSS colours: ``"red"``, ``"black"``, ``"orange"``, ... (case-insensitive)
+      * Iterables of three numbers: ``[255, 128, 0]`` or ``(255, 128, 0)``
+
+    Raises ``ValueError`` for anything else.
+    """
+    if value is None:
+        raise ValueError("color is required")
+
+    if isinstance(value, (tuple, list)):
+        if len(value) != 3:
+            raise ValueError(f"colour list must have 3 elements, got {len(value)}")
+        r, g, b = (int(v) for v in value)
+        return _clamp(r, 0, 255), _clamp(g, 0, 255), _clamp(b, 0, 255)
+
+    if isinstance(value, str):
+        s = value.strip().lower()
+        if not s:
+            raise ValueError("empty colour string")
+        if s in _NAMED_COLORS:
+            return _NAMED_COLORS[s]
+        # Hex: "#rgb", "#rrggbb", or the same without the leading "#"
+        if s.startswith("#"):
+            s = s[1:]
+        if all(c in "0123456789abcdef" for c in s):
+            if len(s) == 3:
+                return (int(s[0] * 2, 16), int(s[1] * 2, 16), int(s[2] * 2, 16))
+            if len(s) == 6:
+                return (int(s[0:2], 16), int(s[2:4], 16), int(s[4:6], 16))
+        raise ValueError(f"unrecognised colour: {value!r}")
+
+    raise ValueError(f"unsupported colour type: {type(value).__name__}")
 
 
 def hsv_to_rgb(h: float, s: float = 1.0, v: float = 1.0) -> tuple[int, int, int]:

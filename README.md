@@ -69,7 +69,10 @@ Pixoo(ip, port=80, *, size=64, refresh_connection=True, debug=False)
 | `draw_bar(x, y, w, h, value, r, g, b, ...)` | Progress bar. `value` 0.0–1.0, unfilled portion uses `bg_r/bg_g/bg_b` (default 40) |
 | `draw_text(text, x, y, r, g, b, align=, max_width=)` | Bitmap text (PICO-8 font, see below) |
 | `draw_image(source, xy=(0,0))` | Load image (path, file, or PIL Image); auto-resizes to fit |
+| `draw_bitmap(x, y, palette, data, scale=1)` | Inline pixel-art sprite: `palette` is a list of `(r,g,b)` tuples (or `None` for transparent), `data` is a list of strings where each char is a base-36 palette index. |
 | `push()` | Send buffer to the display |
+| `to_png(scale=4)` / `save_png(path)` | Encode the current buffer as PNG (nearest-neighbour upscaled so pixels stay crisp) |
+| `to_ascii()` | 10-level grayscale ASCII preview of the current buffer |
 
 ### Text features
 
@@ -114,6 +117,16 @@ python -m pixoo.server --http --port 9100
 PIXOO_IP=10.0.0.42 python -m pixoo.server --http
 ```
 
+The server auto-detects the display resolution from the device at startup
+and bakes it into the MCP instructions, so AI agents can draw immediately
+without a separate info call. To skip auto-detection (e.g. device is
+offline during server start), pass `--size` or set `PIXOO_SIZE`:
+
+```bash
+python -m pixoo.server --ip 10.0.0.42 --size 64
+PIXOO_SIZE=32 python -m pixoo.server --http
+```
+
 ### Docker
 
 ```bash
@@ -127,6 +140,7 @@ Manual equivalent:
 docker build -t pixoo-mcp .
 docker rm -f pixoo-mcp 2>/dev/null || true
 docker run -d --name pixoo-mcp --network host -e PIXOO_IP pixoo-mcp
+# Optional: PIXOO_SIZE=32 for non-64 models
 ```
 
 ### Cursor IDE
@@ -147,10 +161,38 @@ Add to `~/.cursor/mcp.json` for global access:
 
 | Tool | Description |
 |------|-------------|
-| `draw(commands)` | Batch draw operations: clear, pixel, line, rect, circle, text, bar, gradient |
+| `draw(commands, push=True, preview=False)` | Batch draw operations: clear, pixel, line, rect, circle, text, bar, gradient, bitmap. Colours accept hex (`"#ff8800"`, `"#f80"`), CSS names (`"red"`, `"orange"`), or RGB lists (`[255, 136, 0]`). |
 | `show_image(url)` | Fetch and display an image from a URL |
 | `show_text(text, ...)` | Device-side scrolling/static text overlay |
-| `device_control(action, ...)` | Brightness, screen on/off, info, buzzer |
+| `device_control(action, value=...)` | Device-level actions: `info`, `brightness`, `on`/`off`, `buzzer`, `clear_text`, `channel` (`"custom"`, `"faces"`, `"cloud"`, `"visualizer"`, or 0–3), `startup_channel`, `clock <id>`, `play_gif_url <url>`, `reboot` |
+
+#### Previewing draws (headless / no-device iteration)
+
+`draw` takes two extra flags so an agent can see what it rendered:
+
+- `push=False` skips the HTTP push to the device, letting you iterate on a
+  layout without touching hardware.
+- `preview=True` returns the rendered buffer as an ASCII grayscale grid
+  **plus** an inline PNG image content block. Any image-capable MCP client
+  (Cursor, Claude Desktop, Claude Code) will show the PNG directly to the
+  model; other clients fall back to the ASCII preview.
+
+```python
+draw(
+    commands=[
+        {"op":"clear","color":"#000028"},
+        {"op":"circle","cx":32,"cy":32,"radius":20,"color":"#ffdc00","filled":True},
+    ],
+    push=False,
+    preview=True,
+)
+```
+
+The most recent preview is also exposed as:
+
+- MCP resource `pixoo://last-frame.png`
+- HTTP endpoint `GET /api/preview.png` (when running `--http`) — handy for
+  opening in a browser while debugging a remote/headless server.
 
 ## License
 
