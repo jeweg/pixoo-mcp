@@ -98,12 +98,13 @@ calibration.
 
 The `examples/` directory has standalone demos that showcase the library:
 
-| Script | Size | What it shows |
-|--------|------|---------------|
-| `dashboard.py` | all | System-monitor panel with text, progress bars, dividers |
-| `clock.py` | all | Analog clock with trig-drawn hands, live-updating |
-| `game_of_life.py` | all | Conway's Game of Life as a looping animation |
-| `weather_card.py` | 64 | Rich weather card with icon, word-wrapped forecast, humidity bar |
+| Script | Preview | What it shows |
+|--------|---------|---------------|
+| `dashboard.py` | ![dashboard](examples/dashboard.png) | System-monitor panel with text, progress bars, dividers |
+| `clock.py` | ![clock](examples/clock.png) | Analog clock with trig-drawn hands, live-updating |
+| `game_of_life.py` | ![game_of_life](examples/game_of_life.png) | Conway's Game of Life as a looping animation |
+| `weather_card.py` | ![weather_card](examples/weather_card.png) | Rich weather card with icon, word-wrapped forecast, humidity bar |
+| `pixel_art.py` | ![pixel_art](examples/pixel_art.png) | Nighttime scene with bitmap sprites, gradients, `parse_color`, `save_png` |
 
 Run any example:
 
