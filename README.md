@@ -78,8 +78,11 @@ calibration.
 | `draw_text(text, x, y, r, g, b, align=, max_width=)` | Bitmap text (PICO-8 font, see below) |
 | `draw_image(source, xy=(0,0))` | Load image (path, file, or PIL Image); auto-resizes to fit |
 | `draw_bitmap(x, y, palette, data, scale=1)` | Inline pixel-art sprite: `palette` is a list of `(r,g,b)` tuples (or `None` for transparent), `data` is a list of strings where each char is a base-36 palette index. |
-| `push()` | Send buffer to the display |
+| `push()` | Send buffer to the display (auto-cancels any running animation) |
+| `push_animation(frames, speed_ms=100)` | Send a list of `snapshot()` buffers as a looping on-device animation (~60 frame limit on 64x64) |
+| `snapshot()` | Copy the current buffer (for building animation frame lists) |
 | `to_png(scale=4)` / `save_png(path)` | Encode the current buffer as PNG (nearest-neighbour upscaled so pixels stay crisp) |
+| `to_gif(frames, speed_ms=200, scale=4)` / `save_gif(path, frames, ...)` | Encode a list of `snapshot()` buffers as an animated GIF |
 | `to_ascii()` | 10-level grayscale ASCII preview of the current buffer |
 
 ### Text features
@@ -102,10 +105,9 @@ The `examples/` directory has standalone demos that showcase the library:
 |--------|---------|---------------|
 | `dashboard.py` | ![dashboard](examples/dashboard.png) | System-monitor panel with text, progress bars, dividers |
 | `clock.py` | ![clock](examples/clock.png) | Analog clock with trig-drawn hands, live-updating |
-| `game_of_life.py` | ![game_of_life](examples/game_of_life.png) | Conway's Game of Life as a looping animation |
+| `game_of_life.py` | ![game_of_life](examples/game_of_life.gif) | Conway's Game of Life as a looping animation |
 | `weather_card.py` | ![weather_card](examples/weather_card.png) | Rich weather card with icon, word-wrapped forecast, humidity bar |
 | `pixel_art.py` | ![pixel_art](examples/pixel_art.png) | Nighttime scene with bitmap sprites, gradients, `parse_color`, `save_png` |
-
 See also [ASCII previews](examples/ascii_previews.txt) of all examples.
 
 Run any example:
@@ -204,6 +206,23 @@ The most recent preview is also exposed as:
 - MCP resource `pixoo://last-frame.png`
 - HTTP endpoint `GET /api/preview.png` (when running `--http`) — handy for
   opening in a browser while debugging a remote/headless server.
+
+## Known hardware quirks
+
+See [`pixoo/PROTOCOL.md`](pixoo/PROTOCOL.md) for the full protocol reference.
+
+- **Animation frame limit (~60 on 64x64)**: the device has a fixed memory
+  budget for animation frames.  Excess frames are accepted over HTTP but
+  silently dropped from playback.  `push_animation()` warns when you exceed
+  the limit.
+- **Sticky animations**: once a multi-frame animation is playing, a simple
+  `Draw/SendHttpGif` with `PicNum=1` does not interrupt it.  `push()`
+  works around this automatically using a brightness-masked channel switch
+  (brief ~300 ms black-out, no visible flash).
+- **PicID counter overflow**: the device stops responding after ~300
+  `SendHttpGif` calls.  The library auto-resets the counter every 32 pushes.
+- **Phone app conflict**: the Divoom app can switch the channel at any time,
+  overriding your content.  Use `set_startup_channel(3)` or close the app.
 
 ## License
 

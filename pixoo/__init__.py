@@ -62,6 +62,11 @@ _DIVOOM_DISCOVER_URL = "https://app.divoom-gz.com/Device/ReturnSameLANDevice"
 # Auto-reset the counter every N frames to stay healthy.
 _COUNTER_RESET_LIMIT = 32
 
+# The device has a fixed memory budget for animation frames.  Frames
+# beyond this limit are silently accepted over HTTP but never played.
+# Empirically ~60 frames on a Pixoo-64; content complexity shifts it.
+_ANIMATION_FRAME_WARN = 60
+
 
 # ---------------------------------------------------------------------------
 # Discovery
@@ -172,6 +177,7 @@ class Pixoo:
         self._refresh = refresh_connection
         self._counter: int = 0
         self._pushes: int = 0
+        self._animating: bool = False
         self._buffer = bytearray(self.size * self.size * 3)
 
         if gamma is True:
@@ -551,7 +557,16 @@ class Pixoo:
     # ------------------------------------------------------------------
 
     def push(self) -> dict:
-        """Send the current buffer to the display as a single frame."""
+        """Send the current buffer to the display as a single frame.
+
+        If a multi-frame animation is currently playing, it is cancelled
+        first using a brightness-masked channel switch so the transition
+        is visually clean (no flash).
+        """
+        restore_brightness = None
+        if self._animating:
+            restore_brightness = self._stop_animation()
+
         self._counter += 1
         if self._refresh and self._counter >= _COUNTER_RESET_LIMIT:
             self._reset_counter()
@@ -568,6 +583,11 @@ class Pixoo:
             PicData=pic_data,
         )
         self._pushes += 1
+
+        if restore_brightness is not None:
+            time.sleep(0.3)
+            self.set_brightness(restore_brightness)
+
         return result
 
     def push_animation(self, frames: list[bytes | bytearray], speed_ms: int = 100) -> list[dict]:
@@ -576,7 +596,19 @@ class Pixoo:
         Each frame must be a ``size * size * 3`` byte RGB buffer.
         Tip: build frames by drawing into the buffer, then snapshot with
         ``bytes(p._buffer)`` before drawing the next frame.
+
+        .. warning:: The device has a limited frame buffer (~60 frames on
+           64x64).  Excess frames are accepted over HTTP but silently
+           dropped from playback.
         """
+        import warnings
+        if len(frames) > _ANIMATION_FRAME_WARN:
+            warnings.warn(
+                f"Sending {len(frames)} animation frames; the device may"
+                f" only play ~{_ANIMATION_FRAME_WARN}. Excess frames are"
+                f" silently dropped.",
+                stacklevel=2,
+            )
         self._counter += 1
         if self._refresh and self._counter >= _COUNTER_RESET_LIMIT:
             self._reset_counter()
@@ -595,7 +627,29 @@ class Pixoo:
                 PicData=pic_data,
             ))
         self._pushes += 1
+        self._animating = len(frames) > 1
         return results
+
+    def _stop_animation(self) -> int:
+        """Cancel a running animation with a brightness-masked channel switch.
+
+        Drops brightness to 0 and switches to the Visualizer channel to
+        flush the GIF state.  Does NOT switch back to channel 3 — the
+        subsequent ``Draw/SendHttpGif`` in ``push()`` does that implicitly.
+        Returns the original brightness so the caller can restore it after
+        the new frame is on screen.
+        """
+        try:
+            conf = self.get_config()
+            brightness = conf.get("Brightness", 80)
+        except Exception:
+            brightness = 80
+        self.set_brightness(0)
+        self.set_channel(2)
+        self._reset_counter()
+        self._counter = 0
+        self._animating = False
+        return brightness
 
     def snapshot(self) -> bytes:
         """Return a copy of the current buffer (useful for building animations)."""
@@ -623,6 +677,42 @@ class Pixoo:
         """Write the current buffer to *path* as a PNG file."""
         with open(path, "wb") as f:
             f.write(self.to_png(scale=scale))
+
+    def to_gif(self, frames: list[bytes | bytearray], speed_ms: int = 200, scale: int = 4) -> bytes:
+        """Encode a list of snapshot buffers as an animated GIF.
+
+        Each entry in *frames* must be a ``size * size * 3`` byte RGB buffer
+        (as returned by :meth:`snapshot`).  *speed_ms* sets the per-frame
+        delay.  *scale* upsamples with nearest-neighbour (same as *to_png*).
+        Requires Pillow.
+        """
+        if not _HAS_PIL:
+            raise ImportError("Pillow is required for to_gif: pip install Pillow")
+        if not frames:
+            raise ValueError("frames list is empty")
+
+        imgs = []
+        for buf in frames:
+            img = Image.frombytes("RGB", (self.size, self.size), bytes(buf))
+            if scale and scale > 1:
+                img = img.resize(
+                    (self.size * scale, self.size * scale),
+                    Image.Resampling.NEAREST,
+                )
+            imgs.append(img)
+
+        out = io.BytesIO()
+        imgs[0].save(
+            out, format="GIF", save_all=True,
+            append_images=imgs[1:], loop=0, duration=speed_ms,
+        )
+        return out.getvalue()
+
+    def save_gif(self, path: str, frames: list[bytes | bytearray],
+                 speed_ms: int = 200, scale: int = 4):
+        """Write snapshot buffers to *path* as an animated GIF."""
+        with open(path, "wb") as f:
+            f.write(self.to_gif(frames, speed_ms=speed_ms, scale=scale))
 
     def to_ascii(self) -> str:
         """Return a grayscale ASCII preview of the current buffer.

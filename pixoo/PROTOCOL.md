@@ -109,11 +109,40 @@ Auto-reset every ~32 frames to stay stable.
 
 ### Limits
 
-- Max ~40 frames per animation (device may crash beyond this).
+- **Animation frame buffer**: the device has a fixed memory budget for
+  animation frames.  On a Pixoo-64, ~60 frames play reliably; 70 is
+  borderline; at 80+ the device silently drops the tail (plays only
+  ~60-63).  The HTTP API returns success for every frame regardless —
+  the only way to detect the limit is to watch the display.
 - A "Loading.." animation plays briefly when receiving an animation.
 - Single-frame pushes are instant.
 - Text overlay (`Draw/SendHttpText`) only works on top of `Draw/SendHttpGif`
   content, not on SD card GIFs or gallery images.
+
+### Cancelling a running animation
+
+Once a multi-frame animation is playing, `Draw/SendHttpGif` with
+`PicNum=1` does **not** interrupt it — the device keeps looping the old
+animation.  `Draw/ResetHttpGifId` only resets the PicID counter, not
+playback state.  `Channel/OnOffScreen` stops playback but the screen
+stays off.
+
+The only reliable workaround is a **channel switch** — switching to any
+other channel (e.g. Visualizer / channel 2) flushes the animation state.
+However, the target channel's content flashes briefly on screen.
+
+**Brightness-masked channel switch** (what `push()` uses):
+
+1. Read current brightness via `Channel/GetAllConf`.
+2. Set brightness to 0 (`Channel/SetBrightness`).
+3. Switch to channel 2 (`Channel/SetIndex` with `SelectIndex=2`).
+4. Reset the GIF counter (`Draw/ResetHttpGifId`).
+5. Push the new single frame (`Draw/SendHttpGif` with `PicNum=1`) —
+   this implicitly switches back to channel 3.
+6. Wait ~300 ms for the frame to land.
+7. Restore brightness.
+
+This produces a brief black-out (~300 ms) instead of a visible flash.
 
 ## Text overlay
 

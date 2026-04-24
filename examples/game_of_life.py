@@ -5,6 +5,7 @@ Works on all display sizes (16, 32, 64).  Showcases:
   - set_pixel with hsv_to_rgb for colour
   - clear
   - snapshot / push_animation (multi-frame animation)
+  - save_gif (optional, with --gif flag)
 """
 
 import os
@@ -16,6 +17,7 @@ from pixoo import Pixoo, hsv_to_rgb
 
 FRAMES = 30
 SEED_DENSITY = 0.35
+SPEED_MS = 200
 
 
 def neighbours(grid, x, y, w, h):
@@ -65,11 +67,16 @@ def game_of_life(p: Pixoo, frames: int = FRAMES):
 
 
 if __name__ == "__main__":
-    ip = sys.argv[1] if len(sys.argv) > 1 else os.environ.get("PIXOO_IP")
+    save_gif = "--gif" in sys.argv
+    args = [a for a in sys.argv[1:] if a != "--gif"]
+    ip = args[0] if args else os.environ.get("PIXOO_IP")
     if not ip:
-        print("Usage: python game_of_life.py <IP>  (or set PIXOO_IP)")
+        print("Usage: python game_of_life.py <IP> [--gif]  (or set PIXOO_IP)")
         sys.exit(1)
     p = Pixoo(ip)
     print(f"Generating {FRAMES} frames of Life on {p.size}x{p.size}...")
     frames = game_of_life(p)
-    print(p.push_animation(frames, speed_ms=200))
+    print(p.push_animation(frames, speed_ms=SPEED_MS))
+    if save_gif:
+        p.save_gif("game_of_life.gif", frames, speed_ms=SPEED_MS)
+        print("Saved preview to game_of_life.gif")
