@@ -4,5 +4,8 @@ services:
     container_name: pixoo-mcp
     network_mode: host
     restart: unless-stopped
+    volumes:
+      - ./pixoo:/app/pixoo
     environment:
       - PIXOO_IP=${PIXOO_IP}
+      - PYTHONDONTWRITEBYTECODE=1

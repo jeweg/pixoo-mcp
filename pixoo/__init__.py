@@ -89,6 +89,66 @@ def discover(timeout: float = 5) -> list[dict]:
 
 _VALID_SIZES = (16, 32, 64)
 
+# ---------------------------------------------------------------------------
+# LED gamma correction
+# ---------------------------------------------------------------------------
+# The Pixoo's blue LEDs are significantly more luminous per unit drive value
+# than red or green.  A colour like [96, 0, 192] (intended as blue-purple)
+# appears pure blue on the panel because the red component is perceptually
+# invisible next to the blue.  To compensate we apply a per-channel transfer
+# curve before sending bytes to the device.
+#
+# A pure power curve (out = in^γ) over-boosts near-black values, turning
+# dark blues into visible grey/green.  Instead we use identity below a
+# knee point and a remapped power curve above it:
+#
+#   if in <= knee:  out = in                   (identity, no boost)
+#   else:           power curve, shifted to be continuous at the knee
+#                   and to reach 255 at input 255
+#
+# Empirically calibrated on a Pixoo-64 (April 2026):
+#   R and G need a strong boost (γ ≈ 0.25, knee ≈ 15)
+#   B is the reference channel (identity)
+#
+# The resulting LUT is a ``bytes`` of length 256 per channel, applied in
+# ``push()`` so that ``to_png()`` still returns sRGB-correct colours.
+
+_DEFAULT_GAMMA = (0.25, 0.25, 1.0)
+_DEFAULT_KNEE = 15
+
+
+def _build_gamma_lut(
+    gamma: tuple[float, float, float],
+    knee: int = _DEFAULT_KNEE,
+) -> tuple[bytes, bytes, bytes]:
+    """Build 256-entry lookup tables for (R, G, B) gamma correction.
+
+    Below *knee* the mapping is identity (no boost).  Above *knee* a power
+    curve ``255 * (x/255)^γ`` is applied, shifted so that the output is
+    continuous at the knee point.  This avoids boosting near-black values
+    into visible grey while still correcting mid-range colours.
+    """
+    def _lut(g: float) -> bytes:
+        if g == 1.0:
+            return bytes(range(256))
+        # Power-curve value at the knee and at 255
+        knee_pow = 255.0 * (knee / 255.0) ** g
+        # We want: out(knee) = knee  (identity at the boundary)
+        # and:     out(255) = 255
+        # Remap the power curve from [knee_pow..255] to [knee..255]
+        span_in = 255.0 - knee_pow
+        span_out = 255.0 - knee
+        table = []
+        for i in range(256):
+            if i <= knee:
+                table.append(i)
+            else:
+                raw = 255.0 * (i / 255.0) ** g
+                table.append(round(knee + (raw - knee_pow) * span_out / span_in))
+            table[-1] = min(255, max(0, table[-1]))
+        return bytes(table)
+    return (_lut(gamma[0]), _lut(gamma[1]), _lut(gamma[2]))
+
 
 class Pixoo:
     """Draw on a Divoom Pixoo display (16x16, 32x32, or 64x64) over Wi-Fi."""
@@ -101,6 +161,7 @@ class Pixoo:
         size: int = 64,
         refresh_connection: bool = True,
         debug: bool = False,
+        gamma: bool | tuple[float, float, float] = True,
     ):
         if size not in _VALID_SIZES:
             raise ValueError(f"size must be one of {_VALID_SIZES}, got {size}")
@@ -112,6 +173,13 @@ class Pixoo:
         self._counter: int = 0
         self._pushes: int = 0
         self._buffer = bytearray(self.size * self.size * 3)
+
+        if gamma is True:
+            self._gamma_lut = _build_gamma_lut(_DEFAULT_GAMMA)
+        elif gamma is False:
+            self._gamma_lut = None
+        else:
+            self._gamma_lut = _build_gamma_lut(gamma)
 
         if self.ping():
             self._load_counter()
@@ -148,6 +216,23 @@ class Pixoo:
             return resp.status_code == 200
         except requests.RequestException:
             return False
+
+    # ------------------------------------------------------------------
+    # Gamma correction
+    # ------------------------------------------------------------------
+
+    def _gamma_correct(self, buf: bytes | bytearray) -> bytes:
+        """Apply per-channel gamma LUT to an RGB buffer for device output."""
+        if self._gamma_lut is None:
+            return bytes(buf)
+        lut_r, lut_g, lut_b = self._gamma_lut
+        # Interleave into a 768-byte table indexed by (channel * 256 + value)
+        # so we can avoid per-pixel branching.
+        out = bytearray(len(buf))
+        out[0::3] = bytes(lut_r[v] for v in buf[0::3])
+        out[1::3] = bytes(lut_g[v] for v in buf[1::3])
+        out[2::3] = bytes(lut_b[v] for v in buf[2::3])
+        return bytes(out)
 
     # ------------------------------------------------------------------
     # Counter management (firmware stability workaround)
@@ -472,7 +557,7 @@ class Pixoo:
             self._reset_counter()
             self._counter = 1
 
-        pic_data = base64.b64encode(bytes(self._buffer)).decode("ascii")
+        pic_data = base64.b64encode(self._gamma_correct(self._buffer)).decode("ascii")
         result = self._post(
             "Draw/SendHttpGif",
             PicNum=1,
@@ -499,7 +584,7 @@ class Pixoo:
 
         results = []
         for i, frame in enumerate(frames):
-            pic_data = base64.b64encode(bytes(frame)).decode("ascii")
+            pic_data = base64.b64encode(self._gamma_correct(frame)).decode("ascii")
             results.append(self._post(
                 "Draw/SendHttpGif",
                 PicNum=len(frames),
