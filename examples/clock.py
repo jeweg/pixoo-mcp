@@ -7,6 +7,7 @@ Works on all display sizes (16, 32, 64).  Showcases:
   - draw_text (digital readout, centered)
   - set_pixel (hour markers)
   - push in a live loop
+  - save_gif (optional, with --gif flag)
 
 Press Ctrl-C to stop.
 """
@@ -69,17 +70,35 @@ def draw_clock(p: Pixoo, now: datetime):
         p.draw_text(time_str, cx, s - 7, 140, 140, 180, align="center")
 
 
+GIF_FRAMES = 30
+
+
 if __name__ == "__main__":
-    ip = sys.argv[1] if len(sys.argv) > 1 else os.environ.get("PIXOO_IP")
+    save_gif = "--gif" in sys.argv
+    args = [a for a in sys.argv[1:] if a != "--gif"]
+    ip = args[0] if args else os.environ.get("PIXOO_IP")
     if not ip:
-        print("Usage: python clock.py <IP>  (or set PIXOO_IP)")
+        print("Usage: python clock.py <IP> [--gif]  (or set PIXOO_IP)")
         sys.exit(1)
     p = Pixoo(ip)
-    print(f"Running clock on {p}  (Ctrl-C to stop)")
-    try:
-        while True:
-            draw_clock(p, datetime.now())
-            p.push()
-            time.sleep(1)
-    except KeyboardInterrupt:
-        print("\nStopped.")
+
+    if save_gif:
+        from datetime import timedelta
+
+        print(f"Capturing {GIF_FRAMES} frames for GIF on {p}...")
+        now = datetime.now()
+        snapshots = []
+        for i in range(GIF_FRAMES):
+            draw_clock(p, now + timedelta(seconds=i))
+            snapshots.append(p.snapshot())
+        p.save_gif("clock.gif", snapshots, speed_ms=1000)
+        print("Saved preview to clock.gif")
+    else:
+        print(f"Running clock on {p}  (Ctrl-C to stop)")
+        try:
+            while True:
+                draw_clock(p, datetime.now())
+                p.push()
+                time.sleep(1)
+        except KeyboardInterrupt:
+            print("\nStopped.")
