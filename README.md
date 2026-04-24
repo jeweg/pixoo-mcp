@@ -106,6 +106,8 @@ The `examples/` directory has standalone demos that showcase the library:
 | `weather_card.py` | ![weather_card](examples/weather_card.png) | Rich weather card with icon, word-wrapped forecast, humidity bar |
 | `pixel_art.py` | ![pixel_art](examples/pixel_art.png) | Nighttime scene with bitmap sprites, gradients, `parse_color`, `save_png` |
 
+See also [ASCII previews](examples/ascii_previews.txt) of all examples.
+
 Run any example:
 
 ```bash
