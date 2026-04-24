@@ -1,0 +1,6 @@
+services:
+  pixoo-mcp:
+    volumes:
+      - ./pixoo:/app/pixoo
+    environment:
+      - PYTHONDONTWRITEBYTECODE=1
