@@ -51,10 +51,18 @@ auto-discovery via the Divoom cloud.
 ### Constructor
 
 ```python
-Pixoo(ip, port=80, *, size=64, refresh_connection=True, debug=False)
+Pixoo(ip, port=80, *, size=64, refresh_connection=True, debug=False, gamma=True)
 ```
 
 `size` must be 16, 32, or 64 matching your hardware model.
+
+`gamma` controls per-channel LED gamma correction. The Pixoo's blue LEDs
+are much brighter than red/green at the same drive value, so colours like
+purple appear as pure blue without correction. With `gamma=True` (the
+default) a calibrated LUT boosts R and G before sending to the device,
+while `to_png()` still returns sRGB-correct colours. Pass `False` to
+disable, or a `(R, G, B)` tuple of per-channel exponents for custom
+calibration.
 
 ### Drawing
 
